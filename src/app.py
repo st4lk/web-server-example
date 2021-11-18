@@ -1,11 +1,23 @@
 import os
 import time
+from typing import Dict, Callable, Iterable
 
 
 class WebApp:
 
     def __init__(self):
         pass
+
+    def __call__(self, environ: Dict, start_response: Callable) -> Iterable:
+        method = environ['REQUEST_METHOD']
+        path = environ['PATH_INFO']
+        status, body = self.handle(method, path)
+        response_headers = [
+            ('Content-Type', 'text/html; charset=utf-8'),
+        ]
+        start_response(status, response_headers)
+
+        return [body.encode('utf8')]
 
     def handle(self, method: str, path: str, http_headers: dict=None):
         pid = os.getpid()

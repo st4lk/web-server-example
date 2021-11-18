@@ -3,13 +3,82 @@ import socket
 import time
 import multiprocessing
 import importlib
+import io
+from typing import Dict, Tuple, List, Optional
+
+
+class Response:
+
+    def __init__(self, data, web_app, host, port):
+        self.data = data
+        self.web_app = web_app
+        self.host = host
+        self.port = port
+        self.status: Optional[str] = None
+        self.response_headers: Optional[List[Tuple]] = None
+
+    def __iter__(self):
+
+        environ = self.get_environ()
+        web_app_response = self.web_app(environ, self.start_response)
+        http_version = environ['SERVER_PROTOCOL']
+        for index, resp_part in enumerate(web_app_response):
+            if index == 0:
+                headers = f'{http_version} {self.status}\r\n'
+                for header_name, header_value in self.response_headers:
+                    headers += f'{header_name}: {header_value}\r\n'
+                headers += '\r\n'
+                yield headers.encode('ascii')
+            yield resp_part
+
+    def start_response(self, status, response_headers):
+        assert self.status is None
+        assert self.response_headers is None
+        self.status = status
+        self.response_headers = response_headers
+
+    def get_environ(self) -> Dict:
+        raw_headers, raw_body = self.data.split(b'\r\n\r\n', 1)
+        decoded_headers = raw_headers.decode('ascii').split('\r\n')
+        method, path, http_version = decoded_headers[0].split(' ')
+        headers = {}
+        for header_row in decoded_headers[1:]:
+            name, value = header_row.split(':', 1)
+            headers[name] = value.strip()
+
+        environ = {
+            'REQUEST_METHOD': method,
+            'SCRIPT_NAME': '',
+            'PATH_INFO': path,
+            'QUERY_STRING': '',
+            'CONTENT_TYPE': headers.get('Content-Type', ''),
+            'CONTENT_LENGTH': headers.get('Content-Length', ''),
+            'SERVER_NAME': self.host,
+            'SERVER_PORT': self.port,
+            'SERVER_PROTOCOL': http_version,
+        }
+        environ.update({
+            f'HTTP_{name}'.upper(): value for name, value in headers.items()
+        })
+        environ.update({
+            'wsgi.version': (1, 0),
+            'wsgi.url_scheme': 'http',
+            'wsgi.input': io.BytesIO(raw_body),
+            'wsgi.errors': io.StringIO(''),
+            'wsgi.multithread': False,
+            'wsgi.multiprocess': True,
+            'wsgi.run_once': False,
+        })
+        return environ
 
 
 class Worker:
 
-    def __init__(self, server_socket, web_app):
+    def __init__(self, server_socket, web_app, host, port):
         self.server_socket = server_socket
         self.web_app = web_app
+        self.host = host
+        self.port = port
 
     def __call__(self):
         while True:
@@ -20,21 +89,9 @@ class Worker:
                 print(f'Got data from {addr}')
                 print(data_decoded)
 
-                lines = data_decoded.split('\r\n')
-                method, path, http_version = lines[0].split(' ')
-
-                # here is the strange place
-                # there is WSGI
-                status, body = self.web_app.handle(method, path)
-
-                response = (
-                    f'{http_version} {status}\r\n'
-                    'Content-Type: text/html; charset:utf-8\r\n'
-                    '\r\n'
-                    f'{body}'
-                )
-
-                client_socket.sendall(response.encode('utf8'))
+                resp = Response(data, self.web_app, self.host, self.port)
+                for resp_part in resp:
+                    client_socket.sendall(resp_part)
             finally:
                 client_socket.close()
 
@@ -59,7 +116,7 @@ class WebServer:
             server_socket.listen(4)
 
             self.workers = [
-                multiprocessing.Process(target=Worker(server_socket, web_app), daemon=True)
+                multiprocessing.Process(target=Worker(server_socket, web_app, self.host, self.port), daemon=True)
                 for i in range(self.num_workers)
             ]
 
