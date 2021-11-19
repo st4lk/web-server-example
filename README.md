@@ -31,7 +31,7 @@ cd gunicorn
 make run
 ```
 
-If you want to server your own app (django), do the following:
+If you want to serve your own app (django), do the following:
 ```bash
 cd /path/to/django/project/
 # activate your virtual env if you use it
