@@ -24,11 +24,20 @@ PYTHONPATH=. python /path/to/current/webserver/src/server.py project.wsgi:applic
 
 ### Run gunicorn
 
-- Will serve on http://0.0.0.0:9999
+- Will serve app from this repo on http://0.0.0.0:9999
 
 ```bash
 cd gunicorn
 make run
+```
+
+If you want to server your own app (django), do the following:
+```bash
+cd /path/to/django/project/
+# activate your virtual env if you use it
+pip install gunicorn
+# replace "project" with your project name
+gunicorn -b 0.0.0.0:9999 -w 2 project.wsgi:application
 ```
 
 ### Run nginx
